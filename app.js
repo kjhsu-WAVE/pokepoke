@@ -1,6 +1,6 @@
 'use strict';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const LS_KEY = 'pokepoke.v1';
 const LOGOS = ['assets/logo-a.jpg', 'assets/logo-b.jpg'];
 const MAX_CLIPS = 10;
@@ -17,11 +17,11 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
    ========================================================================= */
 function defaultConfig() {
   return {
-    rows: 10, cols: 10,
+    rows: 5, cols: 6,
     prizes: [
-      { id: uid(), name: '頭獎', count: 1 },
-      { id: uid(), name: '二獎', count: 3 },
-      { id: uid(), name: '三獎', count: 10 },
+      { id: uid(), name: '米果獎', count: 14 },
+      { id: uid(), name: '魷魚絲獎', count: 6 },
+      { id: uid(), name: '抱抱獎', count: 10 },
     ],
     blank: '銘謝惠顧',
     title: '戳戳樂',
@@ -43,6 +43,14 @@ function loadState() {
     }
   } catch (e) { /* fall through to defaults */ }
   if (!config) config = defaultConfig();
+  // v1.0.0 shipped placeholder prizes (頭獎/二獎/三獎 on 10×10). If an iPad still has
+  // those untouched and nothing poked yet, switch it to the real event prizes.
+  const sig = config.rows + 'x' + config.cols + ':' + config.prizes.map(p => p.name + p.count).join(',');
+  if (sig === '10x10:頭獎1,二獎3,三獎10' && (!board || !board.opened.some(Boolean))) {
+    const d = defaultConfig();
+    Object.assign(config, { rows: d.rows, cols: d.cols, prizes: d.prizes });
+    board = null;
+  }
   if (!board) board = makeBoard();
   saveState();
 }

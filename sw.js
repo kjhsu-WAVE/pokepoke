@@ -1,6 +1,6 @@
 // Offline cache for 戳戳樂. Bump CACHE whenever any file below changes,
 // otherwise iPads that already installed the app keep the old copy.
-const CACHE = 'pokepoke-1.0.0';
+const CACHE = 'pokepoke-1.0.1';
 const FILES = [
   './',
   'index.html',
