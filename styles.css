@@ -288,6 +288,12 @@ input:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
 .prize-row .del { width: 46px; height: 46px; border-radius: 10px; border: 0; background: transparent; color: var(--danger); font-size: 22px; cursor: pointer; }
 
 .clip-rows { display: flex; flex-direction: column; gap: 8px; }
+.clip-prize { display: flex; align-items: baseline; gap: 10px; margin: 14px 4px 0; }
+.clip-prize:first-child { margin-top: 0; }
+.clip-prize .no { color: var(--gold); font-weight: 800; min-width: 22px; text-align: center; }
+.clip-prize .pname { font-size: 18px; font-weight: 700; color: var(--paper); }
+.clip-prize .src { margin-left: auto; font-size: 14px; color: var(--mist); text-align: right; }
+.clip-row .no { color: var(--mist); font-weight: 600; }
 .clip-row { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: var(--bg); }
 .clip-row .no { color: var(--gold); font-weight: 800; text-align: center; }
 .clip-row .info { color: var(--mist-2); font-variant-numeric: tabular-nums; }

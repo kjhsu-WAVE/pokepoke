@@ -1,9 +1,9 @@
 'use strict';
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const LS_KEY = 'pokepoke.v1';
 const LOGOS = ['assets/logo-a.jpg', 'assets/logo-b.jpg'];
-const MAX_CLIPS = 10;
+const CLIPS_PER_PRIZE = 3; // recordings per prize, keyed `${prizeId}:${n}`
 const MAX_REC_SEC = 10;
 const LONG_PRESS_MS = 3000;
 // Built-in win sounds per prize, picked by a keyword in the prize name.
@@ -134,10 +134,9 @@ const prizeImg = new Map(); // prizeId -> dataURL
    ========================================================================= */
 const audio = {
   ctx: null, master: null, noise: null,
-  clips: new Map(), // slot -> { buf: AudioBuffer, start, dur }
-  lastClip: -1,
+  clips: new Map(), // `${prizeId}:${n}` -> { buf: AudioBuffer, start, dur }
   prizeSets: new Map(), // PRIZE_SOUNDS key -> [{ buf, start, dur }]
-  lastPrize: new Map(), // PRIZE_SOUNDS key -> last index played
+  lastPick: new Map(), // sound-set key -> last index played (avoid back-to-back repeats)
 
   make() {
     if (this.ctx) return this.ctx;
@@ -218,25 +217,29 @@ const audio = {
     s.start(this.ctx.currentTime + at, c.start);
     return c.dur;
   },
-  win(prizeName) {
+  pick(key, n) {
+    let k = randInt(n);
+    if (n > 1) while (k === this.lastPick.get(key)) k = randInt(n);
+    this.lastPick.set(key, k);
+    return k;
+  },
+  // Win sound for a prize: its own recordings → built-in voice (米果/魷魚絲/抱抱) → fanfare
+  win(prize) {
     if (!this.on) return;
-    const ps = config.prizeSounds && this.prizeSet(prizeName);
-    if (ps) {
-      const [key, set] = ps;
-      let k = randInt(set.length);
-      if (set.length > 1) while (k === this.lastPrize.get(key)) k = randInt(set.length);
-      this.lastPrize.set(key, k);
+    const own = prize ? clipKeysOf(prize.id) : [];
+    if (own.length) {
       this.sparkle();
-      this.playBuf(set[k], 0.2);
+      this.playClip(own[this.pick('rec:' + prize.id, own.length)], 0.2);
       return;
     }
-    const slots = [...this.clips.keys()];
-    if (!slots.length) return this.fanfare();
-    let pick = slots[randInt(slots.length)];
-    if (slots.length > 1) while (pick === this.lastClip) pick = slots[randInt(slots.length)];
-    this.lastClip = pick;
-    this.sparkle();
-    this.playClip(pick, 0.2);
+    const ps = config.prizeSounds && prize && this.prizeSet(prize.name);
+    if (ps) {
+      const [key, set] = ps;
+      this.sparkle();
+      this.playBuf(set[this.pick(key, set.length)], 0.2);
+      return;
+    }
+    this.fanfare();
   },
 };
 
@@ -246,15 +249,36 @@ function leadingSilence(buf) { // seconds of near-silence at the start (trimmed 
   return 0;
 }
 
+const clipKey = (prizeId, n) => `${prizeId}:${n}`;
+const clipKeysOf = prizeId => {
+  const out = [];
+  for (let n = 0; n < CLIPS_PER_PRIZE; n++) if (audio.clips.has(clipKey(prizeId, n))) out.push(clipKey(prizeId, n));
+  return out;
+};
+
 async function loadClips() {
   try {
-    for (const [slot, rec] of await db.entries('clips')) {
+    const entries = await db.entries('clips');
+    const taken = new Set(entries.map(e => e[0]).filter(k => typeof k === 'string'));
+    for (let [key, rec] of entries) {
+      if (typeof key === 'number') {
+        // v1.0.2 and earlier stored 10 numbered slots. Move slot N to the N-th prize
+        // (wrapping round the prize list) so existing recordings follow prize order.
+        const ps = config.prizes;
+        const p = ps.length && ps[key % ps.length];
+        let free = null;
+        for (let n = 0; p && n < CLIPS_PER_PRIZE && !free; n++) if (!taken.has(clipKey(p.id, n))) free = clipKey(p.id, n);
+        if (!free) continue; // no room: leave it stored but unused
+        try { await db.put('clips', free, rec); await db.del('clips', key); } catch (e) { continue; }
+        taken.add(free); key = free;
+      }
       try {
         const buf = await audio.decode(rec.data);
-        audio.clips.set(slot, { buf, start: rec.start || 0, dur: buf.duration - (rec.start || 0) });
-      } catch (e) { console.warn('clip decode failed', slot, e); }
+        audio.clips.set(key, { buf, start: rec.start || 0, dur: buf.duration - (rec.start || 0) });
+      } catch (e) { console.warn('clip decode failed', key, e); }
     }
   } catch (e) { console.warn('idb clips', e); }
+  if (!$('#admin').hidden && !$('.tab[data-tab="clips"]').hidden) renderClips();
 }
 
 async function loadPrizeSounds() {
@@ -416,7 +440,7 @@ function poke(i, cell) {
       const li = $(`#prizeList li[data-pi="${pi}"]`);
       if (li) li.classList.add('bump');
       showWin(pi, i);
-      audio.win(board.prizes[pi].name);
+      audio.win(board.prizes[pi]);
     }, 420);
   } else {
     setTimeout(() => audio.lose(), 150);
@@ -690,6 +714,8 @@ $('#newBoard').addEventListener('click', async () => {
   // drop images no longer used by config or the new board
   const keep = new Set(config.prizes.map(p => p.id));
   for (const id of [...prizeImg.keys()]) if (!keep.has(id)) { prizeImg.delete(id); db.del('images', id).catch(() => {}); }
+  // same for recordings of prizes that were deleted
+  for (const k of [...audio.clips.keys()]) if (!keep.has(String(k).split(':')[0])) { audio.clips.delete(k); db.del('clips', k).catch(() => {}); }
   renderAdminBoard();
   renderBoard();
   toast('已開新盤');
@@ -791,56 +817,69 @@ function renderClips() {
 
   const wrap = $('#clipRows');
   wrap.textContent = '';
-  for (let s = 0; s < MAX_CLIPS; s++) {
-    const c = audio.clips.get(s), isRec = recorder.active && recorder.slot === s;
-    const row = el('div', 'clip-row'); row.dataset.slot = s;
-    row.appendChild(el('div', 'no', s + 1));
-    const mid = el('div');
-    const info = el('div', 'info' + (c || isRec ? '' : ' empty'), c ? `${c.dur.toFixed(1)} 秒` : '尚未錄音');
-    mid.appendChild(info);
-    if (isRec) { const m = el('div', 'meter'); m.appendChild(el('i')); mid.appendChild(m); }
-    row.appendChild(mid);
+  if (!config.prizes.length) { wrap.appendChild(el('p', 'hint', '還沒有獎項，請先到「盤面與獎項」新增。')); return; }
+  config.prizes.forEach((p, pi) => {
+    const pname = p.name.trim() || '未命名獎項';
+    const head = el('div', 'clip-prize');
+    head.appendChild(el('span', 'no', pi + 1));
+    head.appendChild(el('span', 'pname', pname));
+    const has = clipKeysOf(p.id).length;
+    const builtIn = config.prizeSounds && PRIZE_SOUNDS.some(d => p.name.includes(d.key));
+    head.appendChild(el('span', 'src', has ? `中獎時隨機播這 ${has} 段` : builtIn ? '沒錄音：播內建專屬語音' : '沒錄音：播內建音效'));
+    wrap.appendChild(head);
 
-    const acts = el('div', 'acts');
-    if (isRec) {
-      const stop = el('button', 'btn small rec', '■ 停止');
-      stop.addEventListener('click', () => recorder.stop());
-      acts.appendChild(stop);
-    } else {
-      const rec = el('button', 'btn small', c ? '重錄' : '● 錄音');
-      rec.disabled = !okMic || recorder.active;
-      rec.addEventListener('click', () => recorder.start(s));
-      acts.appendChild(rec);
-      if (c) {
-        const play = el('button', 'btn small', '▶ 試聽');
-        play.disabled = recorder.active;
-        play.addEventListener('click', () => { audio.unlock(); audio.playClip(s); });
-        const del = el('button', 'btn small danger', '刪除');
-        del.disabled = recorder.active;
-        del.addEventListener('click', async () => {
-          if (!confirm(`刪除第 ${s + 1} 段錄音？`)) return;
-          audio.clips.delete(s);
-          await db.del('clips', s).catch(() => {});
+    for (let n = 0; n < CLIPS_PER_PRIZE; n++) {
+      const s = clipKey(p.id, n), label = `「${pname}」第 ${n + 1} 段`;
+      const c = audio.clips.get(s), isRec = recorder.active && recorder.slot === s;
+      const row = el('div', 'clip-row'); row.dataset.slot = s;
+      row.appendChild(el('div', 'no', n + 1));
+      const mid = el('div');
+      const info = el('div', 'info' + (c || isRec ? '' : ' empty'), c ? `${c.dur.toFixed(1)} 秒` : '尚未錄音');
+      mid.appendChild(info);
+      if (isRec) { const m = el('div', 'meter'); m.appendChild(el('i')); mid.appendChild(m); }
+      row.appendChild(mid);
+
+      const acts = el('div', 'acts');
+      if (isRec) {
+        const stop = el('button', 'btn small rec', '■ 停止');
+        stop.addEventListener('click', () => recorder.stop());
+        acts.appendChild(stop);
+      } else {
+        const rec = el('button', 'btn small', c ? '重錄' : '● 錄音');
+        rec.disabled = !okMic || recorder.active;
+        rec.addEventListener('click', () => recorder.start(s));
+        acts.appendChild(rec);
+        if (c) {
+          const play = el('button', 'btn small', '▶ 試聽');
+          play.disabled = recorder.active;
+          play.addEventListener('click', () => { audio.unlock(); audio.playClip(s); });
+          const del = el('button', 'btn small danger', '刪除');
+          del.disabled = recorder.active;
+          del.addEventListener('click', async () => {
+            if (!confirm(`刪除${label}錄音？`)) return;
+            audio.clips.delete(s);
+            await db.del('clips', s).catch(() => {});
+            renderClips();
+          });
+          acts.append(play, del);
+        }
+        const imp = el('label', 'btn small file', '匯入');
+        const f = el('input'); f.type = 'file'; f.accept = 'audio/*';
+        f.addEventListener('change', async () => {
+          const file = f.files[0];
+          if (!file) return;
+          try { audio.unlock(); await saveClip(s, await file.arrayBuffer(), file.type || 'audio/mp4'); toast(`${label}已匯入`); }
+          catch (e) { toast(e.message === 'too long' ? '音檔太長，請選 20 秒以內的' : '這個音檔格式無法使用'); }
           renderClips();
         });
-        acts.append(play, del);
+        imp.appendChild(f);
+        if (recorder.active) imp.style.pointerEvents = 'none';
+        acts.appendChild(imp);
       }
-      const imp = el('label', 'btn small file', '匯入');
-      const f = el('input'); f.type = 'file'; f.accept = 'audio/*';
-      f.addEventListener('change', async () => {
-        const file = f.files[0];
-        if (!file) return;
-        try { audio.unlock(); await saveClip(s, await file.arrayBuffer(), file.type || 'audio/mp4'); toast(`第 ${s + 1} 段已匯入`); }
-        catch (e) { toast(e.message === 'too long' ? '音檔太長，請選 20 秒以內的' : '這個音檔格式無法使用'); }
-        renderClips();
-      });
-      imp.appendChild(f);
-      if (recorder.active) imp.style.pointerEvents = 'none';
-      acts.appendChild(imp);
+      row.appendChild(acts);
+      wrap.appendChild(row);
     }
-    row.appendChild(acts);
-    wrap.appendChild(row);
-  }
+  });
 }
 
 /* --- settings tab --- */
@@ -869,10 +908,9 @@ $('#cfgVolume').addEventListener('input', e => { config.volume = +e.target.value
 $('#testSound').addEventListener('click', () => {
   audio.unlock();
   if (!config.sound) { toast('音效目前是關閉的'); return; }
-  const names = board.prizes.map(p => p.name);
-  const name = names.length ? names[randInt(names.length)] : '';
-  if (name) toast(`試聽：${name}`, 1200);
-  audio.win(name);
+  const prize = board.prizes.length ? board.prizes[randInt(board.prizes.length)] : null;
+  if (prize) toast(`試聽：${prize.name}`, 1200);
+  audio.win(prize);
 });
 $('#savePin').addEventListener('click', () => {
   const v = $('#cfgPin').value.trim();
