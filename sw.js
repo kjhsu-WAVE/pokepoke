@@ -1,6 +1,6 @@
 // Offline cache for 戳戳樂. Bump CACHE whenever any file below changes,
 // otherwise iPads that already installed the app keep the old copy.
-const CACHE = 'pokepoke-1.0.1';
+const CACHE = 'pokepoke-1.0.2';
 const FILES = [
   './',
   'index.html',
@@ -13,6 +13,15 @@ const FILES = [
   'assets/icon-180.png',
   'assets/icon-192.png',
   'assets/icon-512.png',
+  'assets/sounds/rice-1.mp3',
+  'assets/sounds/rice-2.mp3',
+  'assets/sounds/rice-3.mp3',
+  'assets/sounds/squid-1.mp3',
+  'assets/sounds/squid-2.mp3',
+  'assets/sounds/squid-3.mp3',
+  'assets/sounds/hug-1.mp3',
+  'assets/sounds/hug-2.mp3',
+  'assets/sounds/hug-3.mp3',
 ];
 
 self.addEventListener('install', e => {

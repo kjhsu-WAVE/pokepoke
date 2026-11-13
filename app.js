@@ -1,11 +1,17 @@
 'use strict';
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const LS_KEY = 'pokepoke.v1';
 const LOGOS = ['assets/logo-a.jpg', 'assets/logo-b.jpg'];
 const MAX_CLIPS = 10;
 const MAX_REC_SEC = 10;
 const LONG_PRESS_MS = 3000;
+// Built-in win sounds per prize, picked by a keyword in the prize name.
+const PRIZE_SOUNDS = [
+  { key: '米果', files: ['assets/sounds/rice-1.mp3', 'assets/sounds/rice-2.mp3', 'assets/sounds/rice-3.mp3'] },
+  { key: '魷魚絲', files: ['assets/sounds/squid-1.mp3', 'assets/sounds/squid-2.mp3', 'assets/sounds/squid-3.mp3'] },
+  { key: '抱抱', files: ['assets/sounds/hug-1.mp3', 'assets/sounds/hug-2.mp3', 'assets/sounds/hug-3.mp3'] },
+];
 
 const $ = (s, r = document) => r.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
@@ -27,6 +33,7 @@ function defaultConfig() {
     title: '戳戳樂',
     subtitle: '1344聲工場 × CXC',
     sound: true,
+    prizeSounds: true,
     volume: 0.8,
     pin: '1344',
   };
@@ -129,6 +136,8 @@ const audio = {
   ctx: null, master: null, noise: null,
   clips: new Map(), // slot -> { buf: AudioBuffer, start, dur }
   lastClip: -1,
+  prizeSets: new Map(), // PRIZE_SOUNDS key -> [{ buf, start, dur }]
+  lastPrize: new Map(), // PRIZE_SOUNDS key -> last index played
 
   make() {
     if (this.ctx) return this.ctx;
@@ -190,6 +199,17 @@ const audio = {
     [523.25, 659.25].forEach(f => this.tone(f, t + 0.4, 1.0, 'sine', 0.12));
     this.sparkle(0.45);
   },
+  playBuf(c, at = 0) {
+    const s = this.ctx.createBufferSource();
+    s.buffer = c.buf; s.connect(this.master);
+    s.start(this.ctx.currentTime + at, c.start);
+    return c.dur;
+  },
+  prizeSet(name) { // the built-in sound set for a prize name, if any are loaded
+    const def = PRIZE_SOUNDS.find(d => (name || '').includes(d.key));
+    const set = def && this.prizeSets.get(def.key);
+    return set && set.length ? [def.key, set] : null;
+  },
   playClip(slot, at = 0) {
     const c = this.clips.get(slot);
     if (!c) return 0;
@@ -198,8 +218,18 @@ const audio = {
     s.start(this.ctx.currentTime + at, c.start);
     return c.dur;
   },
-  win() {
+  win(prizeName) {
     if (!this.on) return;
+    const ps = config.prizeSounds && this.prizeSet(prizeName);
+    if (ps) {
+      const [key, set] = ps;
+      let k = randInt(set.length);
+      if (set.length > 1) while (k === this.lastPrize.get(key)) k = randInt(set.length);
+      this.lastPrize.set(key, k);
+      this.sparkle();
+      this.playBuf(set[k], 0.2);
+      return;
+    }
     const slots = [...this.clips.keys()];
     if (!slots.length) return this.fanfare();
     let pick = slots[randInt(slots.length)];
@@ -225,6 +255,22 @@ async function loadClips() {
       } catch (e) { console.warn('clip decode failed', slot, e); }
     }
   } catch (e) { console.warn('idb clips', e); }
+}
+
+async function loadPrizeSounds() {
+  await Promise.all(PRIZE_SOUNDS.map(async d => {
+    const set = [];
+    for (const f of d.files) {
+      try {
+        const r = await fetch(f);
+        if (!r.ok) throw new Error(r.status);
+        const buf = await audio.decode(await r.arrayBuffer());
+        const start = leadingSilence(buf);
+        set.push({ buf, start, dur: buf.duration - start });
+      } catch (e) { console.warn('prize sound failed', f, e); }
+    }
+    audio.prizeSets.set(d.key, set);
+  }));
 }
 
 async function loadImages() {
@@ -370,7 +416,7 @@ function poke(i, cell) {
       const li = $(`#prizeList li[data-pi="${pi}"]`);
       if (li) li.classList.add('bump');
       showWin(pi, i);
-      audio.win();
+      audio.win(board.prizes[pi].name);
     }, 420);
   } else {
     setTimeout(() => audio.lose(), 150);
@@ -802,6 +848,7 @@ function renderSettings() {
   $('#cfgTitle').value = config.title;
   $('#cfgSubtitle').value = config.subtitle;
   $('#cfgSound').checked = config.sound;
+  $('#cfgPrizeSounds').checked = config.prizeSounds;
   $('#cfgVolume').value = config.volume;
   $('#cfgPin').value = '';
   $('#versionText').textContent = `戳戳樂 v${VERSION}`;
@@ -817,11 +864,15 @@ function renderSettings() {
 $('#cfgTitle').addEventListener('input', e => { config.title = e.target.value; saveState(); renderHeader(); });
 $('#cfgSubtitle').addEventListener('input', e => { config.subtitle = e.target.value; saveState(); renderHeader(); });
 $('#cfgSound').addEventListener('change', e => { config.sound = e.target.checked; saveState(); });
+$('#cfgPrizeSounds').addEventListener('change', e => { config.prizeSounds = e.target.checked; saveState(); });
 $('#cfgVolume').addEventListener('input', e => { config.volume = +e.target.value; if (audio.master) audio.master.gain.value = config.volume; saveState(); });
 $('#testSound').addEventListener('click', () => {
   audio.unlock();
   if (!config.sound) { toast('音效目前是關閉的'); return; }
-  audio.win();
+  const names = board.prizes.map(p => p.name);
+  const name = names.length ? names[randInt(names.length)] : '';
+  if (name) toast(`試聽：${name}`, 1200);
+  audio.win(name);
 });
 $('#savePin').addEventListener('click', () => {
   const v = $('#cfgPin').value.trim();
@@ -863,6 +914,7 @@ document.addEventListener('touchmove', e => { if (!e.target.closest('.admin-body
   await loadImages();
   renderBoard();
   loadClips();
+  loadPrizeSounds();
   keepAwake();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

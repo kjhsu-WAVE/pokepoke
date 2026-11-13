@@ -114,7 +114,7 @@
     <section class="tab" data-tab="clips" hidden>
       <div class="card">
         <h3>恭喜中獎錄音</h3>
-        <p class="hint">最多 10 段，每段最長 10 秒。中獎時會從錄好的段落隨機播一段；一段都沒錄的話，就播內建音效。</p>
+        <p class="hint">最多 10 段，每段最長 10 秒。中獎時會從錄好的段落隨機播一段；一段都沒錄的話，就播內建音效。名稱含「米果」「魷魚絲」「抱抱」的獎項預設會播自己的專屬語音，不會用到這裡的錄音；要改用錄音，請到「設定」關掉「獎項專屬語音」。</p>
         <p class="hint warn" id="micWarn" hidden></p>
         <div id="clipRows" class="clip-rows"></div>
       </div>
@@ -130,6 +130,7 @@
       <div class="card">
         <h3>音效</h3>
         <label class="switch"><input type="checkbox" id="cfgSound"> 開啟音效</label>
+        <label class="switch"><input type="checkbox" id="cfgPrizeSounds"> 中獎時播放獎項專屬語音（米果／魷魚絲／抱抱）</label>
         <label class="field">音量 <input type="range" id="cfgVolume" min="0" max="1" step="0.05"></label>
         <button class="btn" id="testSound">試聽中獎音效</button>
       </div>
