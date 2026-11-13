@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="戳戳樂">
+<meta name="theme-color" content="#15181a">
+<title>戳戳樂</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="icon" href="assets/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app">
+  <header class="top">
+    <div class="title-wrap" id="adminHotspot" aria-label="戳戳樂">
+      <h1 id="titleText">戳戳樂</h1>
+      <p id="subtitleText"></p>
+    </div>
+    <div class="progress" id="progressText"></div>
+  </header>
+
+  <main class="stage">
+    <section class="board-frame" id="boardFrame">
+      <div class="board" id="board"></div>
+    </section>
+    <aside class="prizes" id="prizePanel">
+      <h2>剩餘獎項</h2>
+      <ul id="prizeList"></ul>
+      <div class="all-gone" id="allGone" hidden>獎品已全數抽出</div>
+    </aside>
+  </main>
+</div>
+
+<!-- win overlay -->
+<div class="overlay" id="winOverlay" hidden>
+  <canvas id="confetti"></canvas>
+  <div class="win-card" role="dialog" aria-live="assertive">
+    <div class="win-kicker">恭喜中獎</div>
+    <img class="win-img" id="winImg" alt="" hidden>
+    <div class="win-name" id="winName"></div>
+    <div class="win-cell" id="winCell"></div>
+    <button class="btn gold big" id="winClose">收下獎品</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- PIN pad -->
+<div class="overlay dim" id="pinOverlay" hidden>
+  <div class="pin-card">
+    <div class="pin-title">工作人員密碼</div>
+    <div class="pin-dots" id="pinDots"><i></i><i></i><i></i><i></i></div>
+    <div class="pin-pad" id="pinPad">
+      <button>1</button><button>2</button><button>3</button>
+      <button>4</button><button>5</button><button>6</button>
+      <button>7</button><button>8</button><button>9</button>
+      <button data-k="cancel" class="muted">取消</button><button>0</button><button data-k="del" class="muted">⌫</button>
+    </div>
+  </div>
+</div>
+
+<!-- admin -->
+<div class="admin" id="admin" hidden>
+  <div class="admin-head">
+    <nav class="tabs" id="tabs">
+      <button data-tab="board" class="on">盤面與獎項</button>
+      <button data-tab="clips">恭喜錄音</button>
+      <button data-tab="settings">設定</button>
+    </nav>
+    <button class="btn gold" id="adminClose">回到遊戲</button>
+  </div>
+
+  <div class="admin-body">
+    <!-- board & prizes -->
+    <section class="tab" data-tab="board">
+      <div class="card">
+        <h3>目前這一盤</h3>
+        <p id="boardStatus" class="status"></p>
+      </div>
+
+      <div class="card">
+        <h3>格數</h3>
+        <div class="grid-size">
+          <label>列 <input type="number" id="cfgRows" min="2" max="20" inputmode="numeric"></label>
+          <span class="x">×</span>
+          <label>欄 <input type="number" id="cfgCols" min="2" max="20" inputmode="numeric"></label>
+          <span class="eq" id="cfgTotal"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>獎項</h3>
+        <div id="prizeRows" class="prize-rows"></div>
+        <button class="btn" id="addPrize">＋ 新增獎項</button>
+        <div class="blank-row">
+          <label>沒中獎的格子顯示 <input type="text" id="cfgBlank" maxlength="8"></label>
+        </div>
+        <p class="summary" id="cfgSummary"></p>
+      </div>
+
+      <div class="card">
+        <p class="hint">格數和獎項改完後，要按「開新盤」才會生效。開新盤會重新洗牌，目前這一盤的進度會清掉。</p>
+        <button class="btn danger big" id="newBoard">開新盤</button>
+      </div>
+    </section>
+
+    <!-- recordings -->
+    <section class="tab" data-tab="clips" hidden>
+      <div class="card">
+        <h3>恭喜中獎錄音</h3>
+        <p class="hint">最多 10 段，每段最長 10 秒。中獎時會從錄好的段落隨機播一段；一段都沒錄的話，就播內建音效。</p>
+        <p class="hint warn" id="micWarn" hidden></p>
+        <div id="clipRows" class="clip-rows"></div>
+      </div>
+    </section>
+
+    <!-- settings -->
+    <section class="tab" data-tab="settings" hidden>
+      <div class="card">
+        <h3>標題</h3>
+        <label class="field">主標題 <input type="text" id="cfgTitle" maxlength="16"></label>
+        <label class="field">副標題 <input type="text" id="cfgSubtitle" maxlength="30"></label>
+      </div>
+      <div class="card">
+        <h3>音效</h3>
+        <label class="switch"><input type="checkbox" id="cfgSound"> 開啟音效</label>
+        <label class="field">音量 <input type="range" id="cfgVolume" min="0" max="1" step="0.05"></label>
+        <button class="btn" id="testSound">試聽中獎音效</button>
+      </div>
+      <div class="card">
+        <h3>工作人員密碼</h3>
+        <label class="field">新密碼（4 位數字）<input type="password" id="cfgPin" inputmode="numeric" maxlength="4" pattern="[0-9]*"></label>
+        <button class="btn" id="savePin">更新密碼</button>
+      </div>
+      <div class="card">
+        <h3>資料</h3>
+        <p class="hint" id="storageInfo"></p>
+        <button class="btn danger" id="factoryReset">清除全部資料（含錄音）</button>
+      </div>
+      <p class="version" id="versionText"></p>
+    </section>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
